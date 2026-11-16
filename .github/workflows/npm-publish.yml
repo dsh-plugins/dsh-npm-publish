@@ -27,6 +27,9 @@ on:
       package-path:
         type: string
         default: '.'
+      checkout-path:
+        type: string
+        default: '.'
       loader-ref:
         type: string
         default: ''
@@ -76,7 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          path: ${{ inputs.package-path }}
+          path: ${{ inputs.checkout-path }}
       - name: Checkout optional loader workspace
         if: inputs.loader-ref != ''
         uses: actions/checkout@v6
