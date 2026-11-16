@@ -1,0 +1,34 @@
+name: npm release task
+description: Internal implementation of the reusable npm-publish workflow.
+inputs:
+  task:
+    description: resolve, check, publish or writeback
+    required: true
+  working-directory:
+    description: Package directory in the calling repository
+    default: '.'
+outputs:
+  enabled:
+    description: Whether publication is enabled
+    value: ${{ steps.task.outputs.enabled }}
+  name:
+    description: npm package name
+    value: ${{ steps.task.outputs.name }}
+  version:
+    description: Resolved publication version
+    value: ${{ steps.task.outputs.version }}
+  tag:
+    description: npm dist-tag
+    value: ${{ steps.task.outputs.tag }}
+  exists:
+    description: Whether the version is already published
+    value: ${{ steps.task.outputs.exists }}
+runs:
+  using: composite
+  steps:
+    - id: task
+      shell: bash
+      env:
+        RELEASE_TASK: ${{ inputs.task }}
+        PACKAGE_DIR: ${{ inputs.working-directory }}
+      run: node "$GITHUB_ACTION_PATH/scripts/release.mjs"

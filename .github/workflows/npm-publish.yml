@@ -1,0 +1,159 @@
+name: Shared npm publish
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        type: string
+        default: '24'
+      pnpm-version:
+        type: string
+        default: ''
+      install-command:
+        type: string
+        default: npm ci
+      prepare-command:
+        type: string
+        default: npm run build --if-present
+      publish-flags:
+        type: string
+        default: ''
+      release-mode:
+        type: string
+        default: push
+      default-branch:
+        type: string
+        default: main
+      package-path:
+        type: string
+        default: '.'
+      loader-ref:
+        type: string
+        default: ''
+      puppeteer-skip-download:
+        type: boolean
+        default: false
+      sync-lockfile:
+        type: boolean
+        default: false
+      verify-git-head:
+        type: boolean
+        default: false
+      skip-without-token:
+        type: boolean
+        default: false
+      dry-run:
+        description: Build and pack without publishing or committing
+        type: boolean
+        default: false
+    secrets:
+      NPM_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  NPM_REGISTRY: https://registry.npmjs.org
+  DEFAULT_BRANCH: ${{ inputs.default-branch }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      enabled: ${{ steps.release.outputs.enabled }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ inputs.package-path }}
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: ${{ inputs.puppeteer-skip-download && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: ${{ inputs.package-path }}
+      - name: Checkout optional loader workspace
+        if: inputs.loader-ref != ''
+        uses: actions/checkout@v6
+        with:
+          repository: dsh-plugins/dsh-loader
+          ref: ${{ inputs.loader-ref }}
+          path: dsh-loader
+      - name: Set up pnpm
+        if: inputs.pnpm-version != ''
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ inputs.pnpm-version }}
+          package_json_file: ${{ inputs.package-path }}/package.json
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          registry-url: ${{ env.NPM_REGISTRY }}
+          package-manager-cache: false
+      - name: Install dependencies
+        if: inputs.install-command != ''
+        run: ${{ inputs.install-command }}
+      - name: Resolve publish version
+        id: release
+        uses: dsh-plugins/dsh-npm-publish@main
+        with:
+          task: resolve
+          working-directory: ${{ inputs.package-path }}
+        env:
+          RELEASE_MODE: ${{ inputs.release-mode }}
+          SYNC_LOCKFILE: ${{ inputs.sync-lockfile }}
+          SKIP_WITHOUT_TOKEN: ${{ inputs.skip-without-token }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ inputs.dry-run }}
+      - name: Check published version
+        id: published
+        if: steps.release.outputs.enabled == 'true' && !inputs.dry-run
+        uses: dsh-plugins/dsh-npm-publish@main
+        with:
+          task: check
+          working-directory: ${{ inputs.package-path }}
+        env:
+          VERIFY_GIT_HEAD: ${{ inputs.verify-git-head }}
+      - name: Build, test and inspect package
+        if: steps.release.outputs.enabled == 'true' && steps.published.outputs.exists != 'true'
+        run: ${{ inputs.prepare-command }}
+      - name: Publish package
+        if: steps.release.outputs.enabled == 'true' && steps.published.outputs.exists != 'true' && !inputs.dry-run
+        uses: dsh-plugins/dsh-npm-publish@main
+        with:
+          task: publish
+          working-directory: ${{ inputs.package-path }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ steps.release.outputs.tag }}
+          PUBLISH_FLAGS: ${{ inputs.publish-flags }}
+
+  writeback:
+    needs: publish
+    if: needs.publish.outputs.enabled == 'true' && needs.publish.outputs.tag == 'latest' && !inputs.dry-run
+    runs-on: ubuntu-latest
+    concurrency:
+      group: npm-release-writeback
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.default-branch }}
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          package-manager-cache: false
+      - name: Update latest metadata and next patch
+        uses: dsh-plugins/dsh-npm-publish@main
+        with:
+          task: writeback
+        env:
+          EXPECTED_VERSION: ${{ needs.publish.outputs.version }}
+          RELEASE_TAG: v${{ needs.publish.outputs.version }}

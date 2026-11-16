@@ -1,0 +1,6 @@
+{
+  "name": "@dsh-plugin/release-workflow-test-fixture",
+  "version": "1.2.3",
+  "description": "Dry-run fixture; never published",
+  "files": ["index.js"]
+}
